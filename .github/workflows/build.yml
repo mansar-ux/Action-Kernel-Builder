@@ -1,34 +1,82 @@
-name: Android Kernel Build
-
+name: Kernel Builder by ismasrull 3333
 on:
   workflow_dispatch:
     inputs:
-      kernel_repo_url:
-        description: 'Full HTTPS URL to the kernel source repository (e.g., https://github.com/user/repo.git)'
+      KERNEL_URL:
+        description: 'Enter your Kernel Link (e.g., https://github.com/thedauke/android-kernel-meizu-sdm845.git)'
         required: true
-      branch:
-        description: 'Branch name of the kernel repository'
+        default: 'https://github.com/thedauke/android-kernel-meizu-sdm845.git'
+      KERNEL_BRANCH:
+        description: 'Enter your Kernel branch'
         required: true
-      defconfig:
-        description: 'Name of the defconfig file (e.g., vendor_device_defconfig)'
+        default: 'Q-R-WIP'
+      KERNEL_DEFCONFIG:
+        description: 'Enter the defconfig available in your kernel'
         required: true
+        default: 'vayu_defconfig'
+      KBUILD_USER:
+        description: 'Enter the custom username for build'
+        required: true
+        default: 't.me'
+      KBUILD_HOST:
+        description: 'Enter the custom hostname for build'
+        required: true
+        default: 'rizalbrambe'
+      CLANG_URL:
+        description: 'Clang URL'
+        required: true
+        default: 'https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r510928.git -b 14.0'
+      AARCH64_URL:
+        description: 'Aarch64-GCC URL'
+        required: true
+        default: 'https://github.com/radcolor/aarch64-linux-gnu.git'
+      ARM_LINUX_URL:
+        description: 'ARM-LINUX-GNU URL'
+        required: true
+        default: 'https://github.com/radcolor/arm-linux-gnueabi.git'
+      WITH_KERNEL_SU:
+        description: 'With KernelSU? (Set to true if kernel supports it)'
+        required: true
+        default: 'false'
+      ZIP_NAME:
+        description: 'Name for the zip file (without date/time)'
+        required: true
+        default: 'AnymoreProject-Kernel-vayu'
+      ANYKERNEL_URL:
+        description: 'AnyKernel3 URL and branch (e.g., https://github.com/AnymoreProject/AnyKernel3.git -b master)'
+        required: true
+        default: 'https://github.com/AnymoreProject/AnyKernel3.git -b master'
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write
     steps:
-      # Checkout the workflow repository
-      - name: Checkout workflow repository
-        uses: actions/checkout@v4
+      # Display input parameters
+      - name: Display Run Parameters
+        run: |
+          echo "::group::User Environment Variables"
+          echo "Kernel URL: ${{ github.event.inputs.KERNEL_URL }}"
+          echo "Kernel Branch: ${{ github.event.inputs.KERNEL_BRANCH }}"
+          echo "Kernel Defconfig: ${{ github.event.inputs.KERNEL_DEFCONFIG }}"
+          echo "KBUILD User: ${{ github.event.inputs.KBUILD_USER }}"
+          echo "KBUILD Host: ${{ github.event.inputs.KBUILD_HOST }}"
+          echo "Clang URL: ${{ github.event.inputs.CLANG_URL }}"
+          echo "AARCH64 URL: ${{ github.event.inputs.AARCH64_URL }}"
+          echo "ARM Linux URL: ${{ github.event.inputs.ARM_LINUX_URL }}"
+          echo "With KernelSU: ${{ github.event.inputs.WITH_KERNEL_SU }}"
+          echo "Zip Name: ${{ github.event.inputs.ZIP_NAME }}"
+          echo "AnyKernel URL: ${{ github.event.inputs.ANYKERNEL_URL }}"
+          echo "::endgroup::"
 
       # Install dependencies
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf lib32ncurses5-dev lib32readline-dev lib32z1-dev libelf-dev liblz4-tool libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush schedtool squashfs-tools xsltproc zip zlib1g-dev
+          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf libelf-dev liblz4-tool libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush schedtool squashfs-tools xsltproc zip zlib1g-dev device-tree-compiler default-jre automake python3 python2 git-lfs ninja-build texinfo u-boot-tools xz-utils software-properties-common cpio
 
-      # Setup ccache
+      # Set up ccache
       - name: Setup ccache
         uses: actions/cache@v4
         with:
@@ -36,56 +84,118 @@ jobs:
           key: ccache-${{ github.sha }}
           restore-keys: ccache-
 
+      # Set build properties
+      - name: Set Properties
+        run:|
+          echo "BUILD_DATE=$(date +%d%m%Y-%H%M)" >> $GITHUB_ENV
+          echo "ZIP_NAME=${{ github.event.inputs.ZIP_NAME }}-${{ env.BUILD_DATE }}" >> $GITHUB_ENV
+
+      # Initialize git user
+      - name: Initialize user
+        run: |
+          git config --global user.name "${{ github.event.inputs.KBUILD_USER }}"
+          git config --global user.email "rulsmods@gmail.com"
+
+      # Create working directory and clone toolchains
+      - name: Create Folder and Clone Toolchains
+        run: |
+          mkdir -p workspace
+          cd workspace
+          git clone --depth=1 ${{ github.event.inputs.AARCH64_URL }} aarch64-gcc
+          git clone --depth=1 ${{ github.event.inputs.ARM_LINUX_URL }} arm-gcc
+          git clone --depth=1 --single-branch ${{ github.event.inputs.CLANG_URL }} clang-19
+
       # Clone kernel source
-      - name: Clone kernel source
+      - name: Clone kernel tree
+        working-directory: workspace
         run: |
-          git clone --depth 1 ${{ github.event.inputs.kernel_repo_url }} -b ${{ github.event.inputs.branch }} kernel
+          git clone --depth=1 --recurse-submodules -j8 --single-branch ${{ github.event.inputs.KERNEL_URL }} -b ${{ github.event.inputs.KERNEL_BRANCH }} kernel
 
-      # Clone toolchains
-      - name: Clone toolchains
-        run: |
-          mkdir -p toolchains
-          # Download and extract Clang
-          curl -L https://github.com/ZyCromerZ/Clang/releases/download/21.0.0git-20250607-release/Clang-21.0.0git-20250607.tar.gz | tar -xz -C toolchains
-          # Clone Aarch64 GCC
-          git clone --depth 1 https://github.com/radcolor/aarch64-linux-gnu.git toolchains/aarch64-linux-gnu
-          # Clone ARM GCC
-          git clone --depth 1 https://github.com/radcolor/arm-linux-gnueabi.git toolchains/arm-linux-gnueabi
+      # Set swap space
+      - name: Set Swap Space
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 32
 
-      # Clone AnyKernel3
-      - name: Clone AnyKernel3
+      # Setup KernelSU if enabled
+      - name: Setup KernelSU
+        working-directory: workspace/kernel
+        if: github.event.inputs.WITH_KERNEL_SU == 'true'
         run: |
-          git clone --depth 1 https://github.com/cumaRull/AnyKernel3.git -b master AnyKernel3
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+          echo -e "CONFIG_KPROBES=y\nCONFIG_HAVE_KPROBES=y\nCONFIG_KPROBE_EVENTS=y\nCONFIG_KSU=y" >> arch/arm64/configs/${{ github.event.inputs.KERNEL_DEFCONFIG }}
+          cat arch/arm64/configs/${{ github.event.inputs.KERNEL_DEFCONFIG }}
+        continue-on-error: true
 
-      # Set up environment
-      - name: Set up environment
+      # Generate defconfig
+      - name: Generate Defconfig
+        working-directory: workspace/kernel
         run: |
-          export PATH=$PWD/toolchains/clang/bin:$PWD/toolchains/aarch64-linux-gnu/bin:$PWD/toolchains/arm-linux-gnueabi/bin:$PATH
           export ARCH=arm64
-          export SUBARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
-          export CC=clang
-          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export KBUILD_BUILD_USER=${{ github.event.inputs.KBUILD_USER }}
+          export KBUILD_BUILD_HOST=${{ github.event.inputs.KBUILD_HOST }}
+          make O=out ${{ github.event.inputs.KERNEL_DEFCONFIG }} -j$(nproc --all)
 
       # Build kernel
-      - name: Build kernel
-        working-directory: kernel
+      - name: Build Kernel
+        working-directory: workspace/kernel
         run: |
-          make O=out ${{ github.event.inputs.defconfig }}
-          make O=out -j$(nproc --all)
+          export USE_CCACHE=1
+          export CCACHE_COMPRESS=1
+          export CCACHE_MAXSIZE=50G
+          export ARCH=arm64
+          export KBUILD_BUILD_USER=${{ github.event.inputs.KBUILD_USER }}
+          export KBUILD_BUILD_HOST=${{ github.event.inputs.KBUILD_HOST }}
+          PATH="${GITHUB_WORKSPACE}/workspace/clang-19/bin:${GITHUB_WORKSPACE}/workspace/aarch64-gcc/bin:${GITHUB_WORKSPACE}/workspace/arm-gcc/bin:${PATH}" \
+          make -j$(nproc --all) O=out \
+            CC="ccache clang" \
+            CLANG_TRIPLE="aarch64-linux-gnu-" \
+            CROSS_COMPILE="${GITHUB_WORKSPACE}/workspace/aarch64-gcc/bin/aarch64-linux-gnu-" \
+            CROSS_COMPILE_ARM32="${GITHUB_WORKSPACE}/workspace/arm-gcc/bin/arm-linux-gnueabi-" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            2>&1 | tee out/build.log
 
       # Package kernel with AnyKernel3
-      - name: Package kernel
-        working-directory: kernel
+      - name: Package Kernel
+        working-directory: workspace
         run: |
-          cp out/arch/arm64/boot/Image.gz-dtb ../AnyKernel3/
-          cd ../AnyKernel3
-          zip -r9 Kernel.zip . -x .git README.md *placeholder
+          git clone --depth=1 ${{ github.event.inputs.ANYKERNEL_URL }} anykernel
+          if [[ -f kernel/out/arch/arm64/boot/Image && -f kernel/out/arch/arm64/boot/dtbo.img ]]; then
+            cp kernel/out/arch/arm64/boot/Image kernel/out/arch/arm64/boot/dtbo.img anykernel/
+            cd anykernel
+            zip -r9 ${{ env.ZIP_NAME }}.zip * -x .git README.md *placeholder
+            mv ${{ env.ZIP_NAME }}.zip ${GITHUB_WORKSPACE}/workspace/
+          else
+            echo "Error: Kernel image or dtbo.img not found!"
+            exit 1
+          fi
+        continue-on-error: true
 
-      # Upload artifact
-      - name: Upload kernel zip
-        uses: actions/upload-artifact@v4
+      # Upload to transfer.sh
+      - name: Upload to transfer.sh
+        working-directory: workspace
+        run: |
+          if [[ -f ${{ env.ZIP_NAME }}.zip ]]; then
+            curl --upload-file ${{ env.ZIP_NAME }}.zip https://transfer.sh
+          else
+            echo "Error: ZIP file not found!"
+            exit 1
+          fi
+        continue-on-error: true
+
+      # Upload to GitHub Release
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: Kernel
-          path: AnyKernel3/Kernel.zip
+          files: |
+            workspace/kernel/out/arch/arm64/boot/Image
+            workspace/kernel/out/arch/arm64/boot/dtbo.img
+            workspace/${{ env.ZIP_NAME }}.zip
+          name: Kernel Build | ${{ env.BUILD_DATE }}
+          tag_name: ${{ github.run_id }}
+          body: |
+            ### Notes
+            * Kernel compiled using custom Clang and GCC
+            * Test at your own risk
+            * Use a kernel flasher or custom recovery to flash the zip file
