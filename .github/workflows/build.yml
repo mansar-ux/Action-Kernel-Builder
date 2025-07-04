@@ -1,4 +1,5 @@
-name: Kernel Builder by ismasrull 3333
+name: Kernel
+
 on:
   workflow_dispatch:
     inputs:
